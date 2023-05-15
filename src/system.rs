@@ -1,4 +1,4 @@
-use crate::{archetype::Archetype, entity::Component, resource::WorldResource, World};
+use crate::{archetype::Archetype, entity::Component, resource::WorldResource, world::World};
 
 pub trait System {
     fn execute(&self, world: &mut World);
