@@ -1,8 +1,9 @@
 use {
-    crate::Component,
+    crate::entity::Component,
     std::any::{Any, TypeId},
 };
 
+#[derive(Debug)]
 // Stores components in a vector
 pub struct Archetype<C: Component> {
     components: Vec<Option<C>>,

@@ -1,9 +1,9 @@
 use {
     crate::{
         archetype::{AnonymousArchetype, Archetype},
+        entity::Component,
         resource::{AnonymousWorldResource, WorldResource},
         system::{IntoSystem, System, Systems},
-        Component,
     },
     std::{
         any::{Any, TypeId},

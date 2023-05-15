@@ -1,7 +1,4 @@
-use {
-    crate::{archetype::Archetype, resource::WorldResource, Component, World},
-    std::marker::PhantomData,
-};
+use crate::{archetype::Archetype, entity::Component, resource::WorldResource, World};
 
 pub trait System {
     fn execute(&self, world: &mut World);
@@ -12,9 +9,6 @@ pub trait IntoSystem<Result: System> {
 
 // region: SystemStore
 
-pub trait SystemParamFn<Params> {
-    fn execute(&self, world: &mut World);
-}
 pub struct SystemStore<Params>(Box<dyn SystemParamFn<Params>>);
 impl<Params> System for SystemStore<Params> {
     fn execute(&self, world: &mut World) {
@@ -22,17 +16,37 @@ impl<Params> System for SystemStore<Params> {
     }
 }
 
-impl<F, A> SystemParamFn<A> for F
-where
-    F: Fn(&A),
-    A: SystemParam + Sized,
-{
-    fn execute(&self, world: &mut World) {
-        let a = A::new(world);
-        self(&a);
-        a.release(world);
-    }
+macro_rules! impl_system_param_fn {
+    () => {
+        // First param is ignored, this allows for 5 parameters per system
+        impl_system_param_fn!(A A B C D E);
+    };
+    ($_: ident) => {};
+    ($_: ident $($x: tt)*) => {
+        impl <$($x: SystemParam + Sized, )* Function> SystemParamFn<($($x, )*)> for Function
+        where
+            Function: Fn($(&$x),*)
+        {
+            #[allow(non_snake_case)]
+            fn execute(&self, world: &mut World) {
+                // 1: Make parameters for function
+                $(let $x = $x::new(world);)*
+                // 2: Call function
+                self($(&$x, )*);
+                // 3: Release data the parameters took
+                $($x.release(world);)*
+            }
+
+        }
+        impl_system_param_fn!($($x)*);
+    };
 }
+
+pub trait SystemParamFn<Params> {
+    fn execute(&self, world: &mut World);
+}
+
+impl_system_param_fn!();
 
 impl<F, Params> IntoSystem<SystemStore<Params>> for F
 where
@@ -65,6 +79,14 @@ impl<C: Component + 'static> SystemParam for Query<C> {
         world.return_archetype(self.0);
     }
 }
+impl<C: Component + 'static> Query<C> {
+    pub fn get(&self) -> &Archetype<C> {
+        &self.0
+    }
+    pub fn get_mut(&mut self) -> &mut Archetype<C> {
+        &mut self.0
+    }
+}
 
 // endregion: Query
 
@@ -84,6 +106,9 @@ impl<R: 'static> SystemParam for Resource<R> {
 impl<R: 'static> Resource<R> {
     pub fn get(&self) -> &R {
         &self.0 .0
+    }
+    pub fn get_mut(&mut self) -> &mut R {
+        &mut self.0 .0
     }
 }
 
