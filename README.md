@@ -1,8 +1,8 @@
 # SECS
 The **S**mol **ECS** crate.
 
-![Unsafe Blocks:](https://img.shields.io/badge/Unsafe%20Blocks-0-green);
-![Dependencies:](https://img.shields.io/badge/Dependencies-0-green);
+![Unsafe Blocks:](https://img.shields.io/badge/Unsafe%20Blocks-0-green)
+![Dependencies:](https://img.shields.io/badge/Dependencies-0-green)
 ![Lines of Code](https://img.shields.io/tokei/lines/github/bright-shard/secs?label=Lines%20of%20Code)
 
 SECS is an extremely small, but feature-complete, ECS library. To my knowledge, it's the first ECS library
