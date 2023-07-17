@@ -1,8 +1,9 @@
 use {
     crate::{
         archetype::{AnonymousArchetype, Archetype},
+        command_queue::Command,
         entity::Component,
-        resource::{AnonymousWorldResource, WorldResource},
+        resource::{AnonymousWorldResource, Resource},
         system::{IntoSystem, System, Systems},
     },
     std::{
@@ -19,6 +20,8 @@ pub struct World {
     resources: Vec<Option<Box<dyn AnonymousWorldResource>>>,
     resource_map: HashMap<TypeId, usize>,
     systems: Option<Systems>,
+    commands: Vec<Command>,
+    exit_runloop: bool,
 }
 impl Default for World {
     fn default() -> Self {
@@ -29,6 +32,8 @@ impl Default for World {
             resources: Vec::new(),
             resource_map: HashMap::new(),
             systems: Some(Systems::default()),
+            commands: Vec::new(),
+            exit_runloop: false,
         }
     }
 }
@@ -103,22 +108,13 @@ impl World {
             .set_unchecked(entity, component)
     }
 
-    pub fn take_resource<D: 'static>(&mut self) -> Option<WorldResource<D>> {
+    pub fn take_resource<D: 'static>(&mut self) -> Option<Resource<D>> {
         let id = self.resource_map.get(&TypeId::of::<D>())?;
         let borrowed_resource = self.resources.get_mut(*id)?;
         let mut resource = None;
         swap(borrowed_resource, &mut resource);
 
-        if let Some(resource) = resource {
-            Some(
-                *resource
-                    .as_any_owned()
-                    .downcast::<WorldResource<D>>()
-                    .unwrap(),
-            )
-        } else {
-            None
-        }
+        resource.map(|resource| *resource.as_any_owned().downcast::<Resource<D>>().unwrap())
     }
     pub fn take_archetype<C: Component + 'static>(&mut self) -> Option<Archetype<C>> {
         let id = self.archetype_map.get(&TypeId::of::<C>())?;
@@ -126,14 +122,10 @@ impl World {
         let mut archetype = None;
         swap(borrowed_archetype, &mut archetype);
 
-        if let Some(archetype) = archetype {
-            Some(*archetype.as_any_owned().downcast::<Archetype<C>>().unwrap())
-        } else {
-            None
-        }
+        archetype.map(|archetype| *archetype.as_any_owned().downcast::<Archetype<C>>().unwrap())
     }
 
-    pub fn return_resource<D: 'static>(&mut self, resource: WorldResource<D>) {
+    pub fn return_resource<D: 'static>(&mut self, resource: Resource<D>) {
         let id = self.resource_map.get(&TypeId::of::<D>()).unwrap();
         self.resources[*id] = Some(Box::new(resource) as Box<dyn AnonymousWorldResource>);
     }
@@ -147,19 +139,51 @@ impl World {
     }
     pub fn add_resource<D: 'static>(&mut self, data: D) {
         let id = TypeId::of::<D>();
-        if self.resource_map.get(&id) == None {
+        if self.resource_map.get(&id).is_none() {
             self.resources.push(Some(
-                Box::new(WorldResource(data)) as Box<dyn AnonymousWorldResource>
+                Box::new(Resource(data)) as Box<dyn AnonymousWorldResource>
             ));
             self.resource_map.insert(id, self.resources.len() - 1);
         }
     }
+
+    pub fn run_once(&mut self) {
+        let mut systems = None;
+        swap(&mut self.systems, &mut systems);
+        systems.as_mut().unwrap().run(self);
+        swap(&mut systems, &mut self.systems);
+    }
     pub fn run(&mut self) {
-        loop {
-            let mut systems = None;
-            swap(&mut self.systems, &mut systems);
-            systems.as_mut().unwrap().run(self);
-            swap(&mut systems, &mut self.systems);
+        let mut systems = None;
+        swap(&mut self.systems, &mut systems);
+        let systems = systems.unwrap();
+
+        while !self.exit_runloop {
+            systems.run(self);
         }
+    }
+
+    pub fn despawn(&mut self, entity: usize) {
+        for archetype in &mut self.archetypes {
+            archetype.as_mut().unwrap().despawn(entity);
+        }
+    }
+
+    pub fn apply_commands(&mut self) {
+        let mut commands = Vec::new();
+        std::mem::swap(&mut self.commands, &mut commands);
+
+        for command in commands {
+            match command {
+                Command::SpawnEntity(builder) => {
+                    builder.build(self);
+                }
+                Command::DespawnEntity(id) => self.despawn(id),
+                Command::ExitRunLoop => self.exit_runloop = true,
+            };
+        }
+    }
+    pub fn add_commands(&mut self, commands: Vec<Command>) {
+        self.commands.extend(commands.into_iter());
     }
 }

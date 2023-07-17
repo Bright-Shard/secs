@@ -1,4 +1,4 @@
-use crate::{archetype::Archetype, entity::Component, resource::WorldResource, world::World};
+use crate::world::World;
 
 pub trait System {
     fn execute(&self, world: &mut World);
@@ -16,37 +16,22 @@ impl<Params> System for SystemStore<Params> {
     }
 }
 
-macro_rules! impl_system_param_fn {
-    () => {
-        // First param is ignored, this allows for 5 parameters per system
-        impl_system_param_fn!(A A B C D E);
-    };
-    ($_: ident) => {};
-    ($_: ident $($x: tt)*) => {
-        impl <$($x: SystemParam + Sized, )* Function> SystemParamFn<($($x, )*)> for Function
-        where
-            Function: Fn($(&$x),*)
-        {
-            #[allow(non_snake_case)]
-            fn execute(&self, world: &mut World) {
-                // 1: Make parameters for function
-                $(let $x = $x::new(world);)*
-                // 2: Call function
-                self($(&$x, )*);
-                // 3: Release data the parameters took
-                $($x.release(world);)*
-            }
+// endregion: SystemStore
 
-        }
-        impl_system_param_fn!($($x)*);
-    };
-}
+// region: SystemParamFn
 
 pub trait SystemParamFn<Params> {
     fn execute(&self, world: &mut World);
 }
 
-impl_system_param_fn!();
+macro_rules! impl_system_param_fn {
+    ($_: ident) => {};
+    ($_: ident $($x: ident)*) => {
+        secs_derive::impl_system_param_fn!($($x)*);
+        impl_system_param_fn!($($x)*);
+    };
+}
+impl_system_param_fn!(A A B C D E F G H I J K L M N O P Q R S T U V W X Y Z);
 
 impl<F, Params> IntoSystem<SystemStore<Params>> for F
 where
@@ -57,62 +42,44 @@ where
     }
 }
 
-// endregion: SystemStore
+// endregion: SystemParamFn
 
 // region: SystemParam
 
-pub trait SystemParam {
-    fn new(world: &mut World) -> Self;
+/// Data that can be taken from and returned to a World
+pub trait WorldData: 'static {
+    /// Releases any taken data back into the World
     fn release(self, world: &mut World);
+
+    /// Takes data from the World, creating a new instance of itself
+    fn take(world: &mut World) -> Self;
+}
+
+pub trait SystemParam {
+    type Data: WorldData;
+    type Fetch<'a>: SystemParam;
+
+    fn fetch(data: &mut Self::Data) -> Self::Fetch<'_>;
+}
+
+impl<WD: WorldData> SystemParam for &'_ WD {
+    type Data = WD;
+    type Fetch<'a> = &'a WD;
+
+    fn fetch(data: &mut Self::Data) -> Self::Fetch<'_> {
+        &(*data)
+    }
+}
+impl<WD: WorldData> SystemParam for &'_ mut WD {
+    type Data = WD;
+    type Fetch<'a> = &'a mut WD;
+
+    fn fetch(data: &mut Self::Data) -> Self::Fetch<'_> {
+        data
+    }
 }
 
 // endregion: SystemParam
-
-// region: Query
-
-pub struct Query<C: Component + 'static>(Archetype<C>);
-impl<C: Component + 'static> SystemParam for Query<C> {
-    fn new(world: &mut World) -> Self {
-        Self(world.take_archetype::<C>().unwrap())
-    }
-    fn release(self, world: &mut World) {
-        world.return_archetype(self.0);
-    }
-}
-impl<C: Component + 'static> Query<C> {
-    pub fn get(&self) -> &Archetype<C> {
-        &self.0
-    }
-    pub fn get_mut(&mut self) -> &mut Archetype<C> {
-        &mut self.0
-    }
-}
-
-// endregion: Query
-
-// region: Resource
-
-pub struct Resource<R: 'static>(WorldResource<R>);
-impl<R: 'static> SystemParam for Resource<R> {
-    fn new(world: &mut World) -> Self {
-        // TODO: Don't unwrap the option from taking resources & archetypes
-        // Also applies to Query above^^^
-        Self(world.take_resource::<R>().unwrap())
-    }
-    fn release(self, world: &mut World) {
-        world.return_resource(self.0);
-    }
-}
-impl<R: 'static> Resource<R> {
-    pub fn get(&self) -> &R {
-        &self.0 .0
-    }
-    pub fn get_mut(&mut self) -> &mut R {
-        &mut self.0 .0
-    }
-}
-
-// endregion: Resource
 
 // region: Systems
 
@@ -122,6 +89,7 @@ impl Systems {
     pub fn run(&self, world: &mut World) {
         for system in &self.0 {
             system.execute(world);
+            world.apply_commands();
         }
     }
 

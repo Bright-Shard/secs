@@ -10,19 +10,17 @@ fn main() {
     world.run();
 }
 
-#[derive(Debug)]
+#[derive(Debug, Component)]
 struct MyComponent {}
-impl Component for MyComponent {}
 
 fn add_entity(world: &mut World) {
-    EntityBuilder::new(world)
+    EntityBuilder::new()
         .add_component(MyComponent {})
-        .build()
-        .unwrap();
+        .build(world);
 }
 
 fn my_system(resource: &Resource<i32>, query: &Query<MyComponent>) {
     println!("System running!");
     println!("Got the resource: {}", resource.get());
-    println!("Got the query: {:?}", query.get());
+    println!("Got the query: {:?}", query);
 }

@@ -1,5 +1,6 @@
 use {
-    crate::entity::Component,
+    crate::{entity::Component, system::WorldData, world::World},
+    core::slice::{Iter, IterMut},
     std::any::{Any, TypeId},
 };
 
@@ -24,17 +25,34 @@ impl<C: Component + 'static> Archetype<C> {
             .filter_map(|component| component.as_ref())
             .collect()
     }
+    pub fn get_somes_mut(&mut self) -> Vec<&mut C> {
+        self.components
+            .iter_mut()
+            .filter_map(|component| component.as_mut())
+            .collect()
+    }
 
     fn verify_length(&mut self, test: usize) {
-        if self.components.len() < test {
-            for _ in 0..(test - self.components.len()) {
+        if self.components.len() <= test {
+            for _ in 0..((test - self.components.len()) + 1) {
                 self.components.push(None);
             }
         }
     }
 
+    pub fn len(&self) -> usize {
+        self.components.len()
+    }
+
+    pub fn iter(&self) -> Iter<Option<C>> {
+        self.components.iter()
+    }
+    pub fn iter_mut(&mut self) -> IterMut<Option<C>> {
+        self.components.iter_mut()
+    }
+
     pub fn get(&self, entity: usize) -> Option<&C> {
-        if entity < self.components.len() {
+        if self.components.len() > entity {
             self.components[entity].as_ref()
         } else {
             None
@@ -47,7 +65,7 @@ impl<C: Component + 'static> Archetype<C> {
 
     pub fn set(&mut self, entity: usize, component: Option<C>) {
         self.verify_length(entity);
-        self.components.insert(entity, component);
+        self.components[entity] = component;
     }
 
     #[allow(clippy::result_unit_err)]
@@ -55,7 +73,7 @@ impl<C: Component + 'static> Archetype<C> {
         match raw_component.downcast::<C>() {
             Ok(component) => {
                 self.verify_length(entity);
-                self.components.insert(entity, Some(*component));
+                self.components[entity] = Some(*component);
                 Ok(())
             }
             Err(_) => Err(()),
@@ -71,6 +89,7 @@ pub trait AnonymousArchetype {
     #[allow(clippy::result_unit_err)]
     fn set_unchecked(&mut self, entity: usize, component: Box<dyn Any>) -> Result<(), ()>;
     fn contained_type_id(&self) -> TypeId;
+    fn despawn(&mut self, entity: usize);
 }
 
 impl<T: Component + 'static> AnonymousArchetype for Archetype<T> {
@@ -89,4 +108,20 @@ impl<T: Component + 'static> AnonymousArchetype for Archetype<T> {
     fn contained_type_id(&self) -> TypeId {
         TypeId::of::<T>()
     }
+    fn despawn(&mut self, entity: usize) {
+        self.set(entity, None);
+    }
 }
+
+// Query is a type alias for Archetype, so Archetype needs to be a WorldData in order for it to be
+// a system param
+impl<C: Component + 'static> WorldData for Archetype<C> {
+    fn take(world: &mut World) -> Self {
+        // TODO: Actual error handling :why:
+        world.take_archetype::<C>().expect("bruh")
+    }
+    fn release(self, world: &mut World) {
+        world.return_archetype(self);
+    }
+}
+pub type Query<C> = crate::archetype::Archetype<C>;

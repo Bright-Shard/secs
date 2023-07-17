@@ -1,36 +1,37 @@
-use {
-    crate::world::World,
-    std::any::{Any, TypeId},
-};
+use {crate::world::World, std::any::Any};
 
 /// Trait for all components that make up UI items
-pub trait Component {}
+pub trait Component {
+    fn prep_archetype(&self, world: &mut World);
+    fn as_any(self: Box<Self>) -> Box<dyn Any>;
+}
 
 /// Builder struct for making entities
-
-pub struct EntityBuilder<'a> {
-    world: &'a mut World,
-    components: Vec<Box<dyn Any>>,
+#[derive(Default)]
+pub struct EntityBuilder {
+    components: Vec<Box<dyn Component>>,
 }
-impl<'a> EntityBuilder<'a> {
-    pub fn new(world: &'a mut World) -> Self {
-        Self {
-            world,
-            components: Vec::new(),
-        }
+impl EntityBuilder {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn add_component<C: Component + 'static>(mut self, component: C) -> Self {
-        self.world.prep_archetype::<C>();
-        self.components.push(Box::new(component) as Box<dyn Any>);
+        self.components.push(Box::new(component));
         self
     }
 
-    pub fn build(self) -> Result<(), ()> {
-        let id = self.world.new_entity();
+    pub fn build(self, world: &mut World) -> usize {
+        let id = world.new_entity();
         for component in self.components {
-            self.world.insert_component_unchecked(id, component)?;
+            component.prep_archetype(world);
+            world
+                .insert_component_unchecked(id, component.as_any())
+                .expect(concat!(
+                    "There was an error building the EntityBuilder. ",
+                    "This is probably a bug with SECS; please open an issue on GitHub."
+                ));
         }
-        Ok(())
+        id
     }
 }
