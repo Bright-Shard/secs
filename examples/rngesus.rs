@@ -1,12 +1,16 @@
+// This example demos systems, components, and commands in SECS. The README has additional context
+// that might help in understanding this example - go check that out first!
+
 use secs::prelude::*;
 
 fn main() {
     let mut world = World::default();
 
+    // Generate a random amount of entities in the world
     let count: u8 = rand::random();
     println!("Generating {count} initial entities...\n\n");
     for _ in 0..count {
-        make_entity().build(&mut world);
+        make_entity(&mut world);
     }
     println!("\n\n");
 
@@ -18,14 +22,11 @@ fn main() {
 
 // Entities
 
-fn make_entity() -> EntityBuilder {
-    let mut life = rand::random();
-    if life < 0 {
-        life += 1;
-        life *= -1;
-    }
-    println!("Spawning entity with {life} life.");
-    EntityBuilder::new().add_component(Life(life))
+fn make_entity(world: &mut World) {
+    // Each entity gets a random amount of life
+    let life: u8 = rand::random();
+    let entity = world.spawn(Life(life.try_into().unwrap_or(i8::MAX)));
+    println!("Spawned entity {entity} with {life} life.");
 }
 
 // Components
@@ -35,33 +36,31 @@ struct Life(i8);
 
 // Systems
 
-fn dmg(query: &mut Query<Life>) {
-    let mut dmg: i8 = rand::random();
-    if dmg < 0 {
-        dmg += 1;
-        dmg *= -1;
+// Damages entities randomly
+fn dmg(query: &Query<&mut Life>) {
+    // All the entities take a random amount of damage each round.
+    let dmg: u8 = rand::random();
+    println!("\nDealing {dmg} damage this round.");
+
+    for mut life_component in query {
+        life_component.0 -= dmg.try_into().unwrap_or(i8::MAX);
     }
-    println!("Dealing {dmg} damage this round.");
-    for entity in 0..query.len() {
-        if let Some(life) = query.get_mut(entity) {
-            life.0 -= dmg;
+}
+
+// Removes dead entities
+fn remove_dead(query: &Query<&Life>, cmds: &mut CommandQueue) {
+    // To despawn entities, we need their entity ID. To do this, we'll use a special iterator in `Query`
+    // that gives us the component from the query and the entity that component belongs to.
+    for (entity, life) in query.iter_with_entity() {
+        if life.0 <= 0 {
+            println!("Entity {entity} died! Despawning...");
+            cmds.despawn(entity);
         }
     }
 }
 
-fn remove_dead(query: &Query<Life>, cmds: &mut CommandQueue) {
-    for entity in 0..query.len() {
-        if let Some(life) = query.get(entity) {
-            if life.0 <= 0 {
-                println!("Entity {entity} died! Despawning...");
-                cmds.despawn(entity);
-            }
-        }
-    }
-}
-
-fn check_all_entities_dead(query: &Query<Life>, cmds: &mut CommandQueue) {
-    if query.get_somes().len() == 0 {
+fn check_all_entities_dead(query: &Query<&Life>, cmds: &mut CommandQueue) {
+    if query.is_empty() {
         println!("All entities have died, exiting run loop...");
         cmds.push(Command::ExitRunLoop);
     }

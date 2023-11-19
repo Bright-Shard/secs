@@ -1,189 +1,113 @@
+pub mod storage;
+pub use storage::*;
+
 use {
     crate::{
-        archetype::{AnonymousArchetype, Archetype},
-        command_queue::Command,
-        entity::Component,
-        resource::{AnonymousWorldResource, Resource},
-        system::{IntoSystem, System, Systems},
+        _crate_prelude::*,
+        entity::Bundle,
+        system::{command::Command, IntoSystem, System, Systems},
     },
-    std::{
-        any::{Any, TypeId},
-        collections::hash_map::{Entry, HashMap},
-        mem::swap,
-    },
+    alloc::rc::Rc,
+    core::cell::RefCell,
 };
 
+/// The ECS World, which holds all the data about the program.
+///
+/// It might make more sense to picture the World like this:
+///
+///```txt
+///                 Entity 1       Entity 2       Entity 3
+/// Component1:   Some(<data>)       None           None
+/// Component2:   Some(<data>)       None       Some(<data>)
+/// Component3:   Some(<data>)   Some(<data>)       None
+/// ```
+///
+/// In this layout, the whole table is the World, each row is an Archetype, each column is an
+/// Entity, and each table item is a Component.
 pub struct World {
-    archetypes: Vec<Option<Box<dyn AnonymousArchetype>>>,
-    archetype_map: HashMap<TypeId, usize>,
-    entities: usize,
-    resources: Vec<Option<Box<dyn AnonymousWorldResource>>>,
-    resource_map: HashMap<TypeId, usize>,
-    systems: Option<Systems>,
-    commands: Vec<Command>,
-    exit_runloop: bool,
+    /// Where all of the entities and resources in the World are actually stored.
+    pub storage: Storage,
+    /// All of the Systems registered in the World.
+    pub systems: Rc<RefCell<Systems>>,
+    /// A flag for the run loop started in `World::run()`. When true, the loop breaks. The
+    /// `ExitRunLoop` command sets this to true.
+    pub exit_run_loop: bool,
 }
 impl Default for World {
     fn default() -> Self {
         Self {
-            archetypes: Vec::new(),
-            archetype_map: HashMap::new(),
-            entities: 0,
-            resources: Vec::new(),
-            resource_map: HashMap::new(),
-            systems: Some(Systems::default()),
-            commands: Vec::new(),
-            exit_runloop: false,
+            storage: Storage::default(),
+            systems: Rc::new(RefCell::new(Systems::default())),
+            exit_run_loop: false,
         }
     }
 }
 impl World {
-    pub fn new_entity(&mut self) -> usize {
-        let result = self.entities;
-        self.entities += 1;
-        result
+    /// Spawns an entity into the World. Returns its ID.
+    pub fn spawn(&mut self, components: impl Bundle) -> usize {
+        let entity = self.storage.spawn();
+        components.components().into_iter().for_each(|component| {
+            component.prep_storage(&mut self.storage);
+            self.storage.insert_component_boxed(entity, component);
+        });
+        entity
+    }
+    /// Spawns an entity, whose components are boxed, into the World. Returns its ID.
+    pub fn spawn_boxed(&mut self, components: Box<dyn Bundle>) -> usize {
+        let entity = self.storage.spawn();
+        components
+            .components_from_box()
+            .into_iter()
+            .for_each(|component| {
+                component.prep_storage(&mut self.storage);
+                self.storage.insert_component_boxed(entity, component);
+            });
+        entity
+    }
+    /// Spawns an entity into the World with no components. Returns the entity's ID.
+    pub fn spawn_empty(&mut self) -> usize {
+        self.storage.spawn()
     }
 
-    pub fn query<C: Component + 'static>(&self) -> Option<&Archetype<C>> {
-        let id = self.archetype_map.get(&TypeId::of::<C>())?;
-        if let Some(archetype) = (*self.archetypes).get(*id)? {
-            archetype.as_any().downcast_ref::<Archetype<C>>()
-        } else {
-            None
-        }
-    }
-    pub fn query_mut<C: Component + 'static>(&mut self) -> Option<&mut Archetype<C>> {
-        let id = self.archetype_map.get(&TypeId::of::<C>())?;
-        if let Some(archetype) = (*self.archetypes).get_mut(*id)? {
-            archetype.as_any_mut().downcast_mut::<Archetype<C>>()
-        } else {
-            None
-        }
+    /// Registers a resource in the world. This will overwrite any existing resources
+    /// of the same type.
+    pub fn insert_resource(&mut self, resource: impl Any + 'static) {
+        self.storage.insert_resource(resource);
     }
 
-    pub fn query_from_entity<C: Component + 'static>(&self, entity: usize) -> Option<&C> {
-        match self.query::<C>() {
-            None => None,
-            Some(archetype) => archetype.get(entity),
-        }
-    }
-    pub fn query_from_entity_mut<C: Component + 'static>(
-        &mut self,
-        entity: usize,
-    ) -> Option<&mut C> {
-        match self.query_mut::<C>() {
-            None => None,
-            Some(archetype) => archetype.get_mut(entity),
-        }
-    }
-
-    pub fn prep_archetype<C: Component + 'static>(&mut self) {
-        let type_id = TypeId::of::<C>();
-        if let Entry::Vacant(entry) = self.archetype_map.entry(type_id) {
-            self.archetypes
-                .push(Some(Box::new(Archetype::<C>::new(self.entities))));
-            entry.insert(self.archetypes.len() - 1);
-        }
-    }
-
-    pub fn insert_component<C: Component + 'static>(&mut self, entity: usize, component: C) {
-        // Ensure we have an archetype for this component type already
-        self.prep_archetype::<C>();
-        let archetype = self.query_mut::<C>().unwrap();
-        archetype.set(entity, Some(component));
-    }
-
-    #[allow(clippy::result_unit_err)]
-    pub fn insert_component_unchecked(
-        &mut self,
-        entity: usize,
-        component: Box<dyn Any>,
-    ) -> Result<(), ()> {
-        let type_id = (*component).type_id();
-        let id = self.archetype_map.get(&type_id).ok_or(())?;
-        let archetype = (*self.archetypes).get_mut(*id).ok_or(())?;
-        archetype
-            .as_mut()
-            .ok_or(())?
-            .set_unchecked(entity, component)
-    }
-
-    pub fn take_resource<D: 'static>(&mut self) -> Option<Resource<D>> {
-        let id = self.resource_map.get(&TypeId::of::<D>())?;
-        let borrowed_resource = self.resources.get_mut(*id)?;
-        let mut resource = None;
-        swap(borrowed_resource, &mut resource);
-
-        resource.map(|resource| *resource.as_any_owned().downcast::<Resource<D>>().unwrap())
-    }
-    pub fn take_archetype<C: Component + 'static>(&mut self) -> Option<Archetype<C>> {
-        let id = self.archetype_map.get(&TypeId::of::<C>())?;
-        let borrowed_archetype = self.archetypes.get_mut(*id)?;
-        let mut archetype = None;
-        swap(borrowed_archetype, &mut archetype);
-
-        archetype.map(|archetype| *archetype.as_any_owned().downcast::<Archetype<C>>().unwrap())
-    }
-
-    pub fn return_resource<D: 'static>(&mut self, resource: Resource<D>) {
-        let id = self.resource_map.get(&TypeId::of::<D>()).unwrap();
-        self.resources[*id] = Some(Box::new(resource) as Box<dyn AnonymousWorldResource>);
-    }
-    pub fn return_archetype<C: Component + 'static>(&mut self, archetype: Archetype<C>) {
-        let id = self.archetype_map.get(&TypeId::of::<C>()).unwrap();
-        self.archetypes[*id] = Some(Box::new(archetype) as Box<dyn AnonymousArchetype>);
-    }
-
+    /// Register a System in the World.
     pub fn add_system<S: System + 'static>(&mut self, system: impl IntoSystem<S>) {
-        self.systems.as_mut().unwrap().push(system);
-    }
-    pub fn add_resource<D: 'static>(&mut self, data: D) {
-        let id = TypeId::of::<D>();
-        if self.resource_map.get(&id).is_none() {
-            self.resources.push(Some(
-                Box::new(Resource(data)) as Box<dyn AnonymousWorldResource>
-            ));
-            self.resource_map.insert(id, self.resources.len() - 1);
-        }
+        self.systems.borrow_mut().push(system);
     }
 
+    /// Runs all of the World's Systems once. This will run even if the `ExitRunLoop` command has been
+    /// used.
     pub fn run_once(&mut self) {
-        let mut systems = None;
-        swap(&mut self.systems, &mut systems);
-        systems.as_mut().unwrap().run(self);
-        swap(&mut systems, &mut self.systems);
+        self.systems.clone().borrow().run(self);
     }
+    /// Runs all of the World's Systems in a loop. The loop can be broken with the `ExitRunLoop`
+    /// command; however, calling this method again after exiting will restart the loop until
+    /// `ExitRunLoop` is called again.
     pub fn run(&mut self) {
-        let mut systems = None;
-        swap(&mut self.systems, &mut systems);
-        let systems = systems.unwrap();
+        self.exit_run_loop = false;
+        let systems = self.systems.clone();
+        let systems = systems.borrow();
 
-        while !self.exit_runloop {
+        while !self.exit_run_loop {
             systems.run(self);
         }
     }
 
-    pub fn despawn(&mut self, entity: usize) {
-        for archetype in &mut self.archetypes {
-            archetype.as_mut().unwrap().despawn(entity);
-        }
-    }
-
-    pub fn apply_commands(&mut self) {
-        let mut commands = Vec::new();
-        std::mem::swap(&mut self.commands, &mut commands);
-
+    /// Applies changes from a command queue to the world.
+    pub fn apply_commands(&mut self, commands: Vec<Command>) {
         for command in commands {
             match command {
-                Command::SpawnEntity(builder) => {
-                    builder.build(self);
+                Command::SpawnEntity(bundle) => {
+                    self.spawn_boxed(bundle);
                 }
-                Command::DespawnEntity(id) => self.despawn(id),
-                Command::ExitRunLoop => self.exit_runloop = true,
+                Command::DespawnEntity(id) => self.storage.despawn(id),
+                Command::ExitRunLoop => self.exit_run_loop = true,
             };
         }
-    }
-    pub fn add_commands(&mut self, commands: Vec<Command>) {
-        self.commands.extend(commands.into_iter());
     }
 }
