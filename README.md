@@ -67,7 +67,7 @@ Systems can access data from the world with system parameters. Currently, the sy
 
 - `Query<Components>`: Allows you to get all entities that have `<Components>` as components, and modify those components.
 `Query` respects Rust's mutability: You must borrow components, either as `&Component` or `&mut Component`, but can only modify
-ones that are mutably borrowed. You can mix and match mutable components - for example, `Query<(&Strength, &mut Health)> is valid,
+ones that are mutably borrowed. You can mix and match mutable components - for example, `Query<(&Strength, &mut Health)>` is valid,
 but will only let you modify the health component.
 - `CommandQueue`: Allows a system to work with `Command`s, which can modify the world. Commands can currently spawn and despawn
 entities, and exit the run loop (if you used the world's run loop, which just infinitely calls systems). Commands are only applied

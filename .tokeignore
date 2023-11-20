@@ -1,4 +1,5 @@
 Cargo.toml
 README.md
 .gitignore
-examples/*
+examples/
+benches/

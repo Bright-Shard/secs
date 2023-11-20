@@ -1,0 +1,63 @@
+[package]
+name = "benches"
+version = "0.1.0"
+edition = "2021"
+description = "Benchmarks for Bevy engine"
+publish = false
+license = "MIT OR Apache-2.0"
+
+[dev-dependencies]
+glam = "0.24.1"
+rand = "0.8"
+rand_chacha = "0.3"
+criterion = { version = "0.3", features = ["html_reports"] }
+secs = { path = "../" }
+
+[profile.release]
+opt-level = 3
+lto = true
+
+# [[bench]]
+# name = "change_detection"
+# path = "benches/bevy_ecs/change_detection.rs"
+# harness = false
+
+[[bench]]
+name = "ecs"
+path = "benches/bevy_ecs/benches.rs"
+harness = false
+
+# [[bench]]
+# name = "reflect_list"
+# path = "benches/bevy_reflect/list.rs"
+# harness = false
+
+# [[bench]]
+# name = "reflect_map"
+# path = "benches/bevy_reflect/map.rs"
+# harness = false
+
+# [[bench]]
+# name = "reflect_struct"
+# path = "benches/bevy_reflect/struct.rs"
+# harness = false
+
+# [[bench]]
+# name = "parse_reflect_path"
+# path = "benches/bevy_reflect/path.rs"
+# harness = false
+
+# [[bench]]
+# name = "iter"
+# path = "benches/bevy_tasks/iter.rs"
+# harness = false
+
+# [[bench]]
+# name = "bezier"
+# path = "benches/bevy_math/bezier.rs"
+# harness = false
+
+# [[bench]]
+# name = "utils"
+# path = "benches/bevy_utils/entity_hash.rs"
+# harness = false
